@@ -458,25 +458,33 @@ class TwoTowerModel(nn.Module):
         # 正样本物品塔
         pos_item_emb = self.item_tower(item_ids, item_dense, batch['item_genre_ids'])
         
-        # 负样本物品塔
-        batch_size = user_ids.size(0)
-        neg_item_emb_list = []
-        for i in range(neg_item_ids.size(1)):
-            neg_emb = self.item_tower(neg_item_ids[:, i], item_dense, batch['item_genre_ids'])
-            neg_item_emb_list.append(neg_emb)
-        neg_item_emb = torch.stack(neg_item_emb_list, dim=1)  # [batch, num_neg, embed_dim]
-        
         # 计算正样本分数
         pos_scores = torch.sum(user_emb * pos_item_emb, dim=-1)  # [batch]
         
-        # 计算负样本分数
-        neg_scores = torch.bmm(neg_item_emb, user_emb.unsqueeze(-1)).squeeze(-1)  # [batch, num_neg]
+        # 负样本物品塔（仅在训练时）
+        batch_size = user_ids.size(0)
+        if neg_item_ids.size(1) > 0:
+            neg_item_emb_list = []
+            for i in range(neg_item_ids.size(1)):
+                neg_emb = self.item_tower(neg_item_ids[:, i], item_dense, batch['item_genre_ids'])
+                neg_item_emb_list.append(neg_emb)
+            neg_item_emb = torch.stack(neg_item_emb_list, dim=1)  # [batch, num_neg, embed_dim]
+            
+            # 计算负样本分数
+            neg_scores = torch.bmm(neg_item_emb, user_emb.unsqueeze(-1)).squeeze(-1)  # [batch, num_neg]
+        else:
+            # 评估时没有负样本
+            neg_item_emb = None
+            neg_scores = None
         
-        # InfoNCE损失
+        # InfoNCE损失（仅在训练时计算）
         temperature = self.temperature()
-        logits = torch.cat([pos_scores.unsqueeze(1), neg_scores], dim=1) / temperature
-        labels_idx = torch.zeros(batch_size, dtype=torch.long, device=device)
-        loss = F.cross_entropy(logits, labels_idx)
+        if neg_scores is not None:
+            logits = torch.cat([pos_scores.unsqueeze(1), neg_scores], dim=1) / temperature
+            labels_idx = torch.zeros(batch_size, dtype=torch.long, device=device)
+            loss = F.cross_entropy(logits, labels_idx)
+        else:
+            loss = torch.tensor(0.0, device=device)
         
         return {
             'loss': loss,

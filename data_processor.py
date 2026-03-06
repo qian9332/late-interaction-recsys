@@ -80,6 +80,14 @@ class MovieLensDataProcessor:
         ].copy()
         print(f"After filtering: {ratings_df.shape[0]} ratings")
         
+        # 1.5 数据采样（如果配置了采样比例）
+        if hasattr(self.config, 'sample_ratio') and self.config.sample_ratio < 1.0:
+            print(f"Sampling {self.config.sample_ratio*100:.1f}% of data...")
+            # 按用户分层采样
+            sample_size = int(len(ratings_df) * self.config.sample_ratio)
+            ratings_df = ratings_df.sample(n=sample_size, random_state=42).copy()
+            print(f"After sampling: {ratings_df.shape[0]} ratings")
+        
         # 2. 编码用户和物品ID
         print("Encoding user and item IDs...")
         ratings_df['user_id'] = self.user_encoder.fit_transform(ratings_df['userId'])
@@ -120,25 +128,27 @@ class MovieLensDataProcessor:
         # 评分归一化
         ratings_df['rating_norm'] = ratings_df['rating'] / 5.0
         
-        # 时间戳转换
-        ratings_df['datetime'] = pd.to_datetime(ratings_df['timestamp'], unit='s')
-        ratings_df['hour'] = ratings_df['datetime'].dt.hour
-        ratings_df['day_of_week'] = ratings_df['datetime'].dt.dayofweek
+        # 时间戳转换 - 优化版本
+        print("Processing timestamps...")
+        timestamps = ratings_df['timestamp'].values
+        hours = (timestamps // 3600) % 24  # 直接计算小时
+        days = ((timestamps // (24 * 3600)) + 4) % 7  # 1970-01-01是周四
+        ratings_df['hour'] = hours.astype(int)
+        ratings_df['day_of_week'] = days.astype(int)
         
         # 时间特征归一化
         ratings_df['hour_norm'] = ratings_df['hour'] / 23.0
         ratings_df['day_norm'] = ratings_df['day_of_week'] / 6.0
         
-        # 删除datetime列释放内存
-        del ratings_df['datetime']
-        
-        # 5. 计算用户统计特征
+        # 5. 计算用户统计特征 - 优化版本
         print("Computing user statistics...")
-        user_stats = ratings_df.groupby('user_id').agg({
-            'rating': ['mean', 'std', 'count'],
-            'hour': 'mean'
-        }).reset_index()
-        user_stats.columns = ['user_id', 'user_avg_rating', 'user_std_rating', 'user_count', 'user_avg_hour']
+        # 使用更高效的聚合方式
+        user_stats = ratings_df.groupby('user_id', sort=False).agg(
+            user_avg_rating=('rating', 'mean'),
+            user_std_rating=('rating', 'std'),
+            user_count=('rating', 'count'),
+            user_avg_hour=('hour', 'mean')
+        ).reset_index()
         user_stats['user_std_rating'] = user_stats['user_std_rating'].fillna(0)
         
         # 归一化
@@ -146,21 +156,41 @@ class MovieLensDataProcessor:
         user_stats[['user_avg_rating_norm', 'user_std_rating_norm', 'user_count_norm', 'user_avg_hour_norm']] = \
             scaler.fit_transform(user_stats[['user_avg_rating', 'user_std_rating', 'user_count', 'user_avg_hour']])
         
-        ratings_df = ratings_df.merge(user_stats, on='user_id', how='left')
+        # 使用map代替merge加速
+        user_avg_map = dict(zip(user_stats['user_id'], user_stats['user_avg_rating_norm']))
+        user_std_map = dict(zip(user_stats['user_id'], user_stats['user_std_rating_norm']))
+        user_count_map = dict(zip(user_stats['user_id'], user_stats['user_count_norm']))
+        user_hour_map = dict(zip(user_stats['user_id'], user_stats['user_avg_hour_norm']))
         
-        # 6. 计算物品统计特征
+        ratings_df['user_avg_rating_norm'] = ratings_df['user_id'].map(user_avg_map)
+        ratings_df['user_std_rating_norm'] = ratings_df['user_id'].map(user_std_map)
+        ratings_df['user_count_norm'] = ratings_df['user_id'].map(user_count_map)
+        ratings_df['user_avg_hour_norm'] = ratings_df['user_id'].map(user_hour_map)
+        
+        # 6. 计算物品统计特征 - 优化版本
         print("Computing item statistics...")
-        item_stats = ratings_df.groupby('item_id').agg({
-            'rating': ['mean', 'std', 'count']
-        }).reset_index()
-        item_stats.columns = ['item_id', 'item_avg_rating', 'item_std_rating', 'item_count']
+        item_stats = ratings_df.groupby('item_id', sort=False).agg(
+            item_avg_rating=('rating', 'mean'),
+            item_std_rating=('rating', 'std'),
+            item_count=('rating', 'count')
+        ).reset_index()
         item_stats['item_std_rating'] = item_stats['item_std_rating'].fillna(0)
         
         item_stats[['item_avg_rating_norm', 'item_std_rating_norm', 'item_count_norm']] = \
             scaler.fit_transform(item_stats[['item_avg_rating', 'item_std_rating', 'item_count']])
         
-        ratings_df = ratings_df.merge(item_stats, on='item_id', how='left')
-        movies_df = movies_df.merge(item_stats, on='item_id', how='left')
+        # 使用map代替merge加速
+        item_avg_map = dict(zip(item_stats['item_id'], item_stats['item_avg_rating_norm']))
+        item_std_map = dict(zip(item_stats['item_id'], item_stats['item_std_rating_norm']))
+        item_count_map = dict(zip(item_stats['item_id'], item_stats['item_count_norm']))
+        
+        ratings_df['item_avg_rating_norm'] = ratings_df['item_id'].map(item_avg_map)
+        ratings_df['item_std_rating_norm'] = ratings_df['item_id'].map(item_std_map)
+        ratings_df['item_count_norm'] = ratings_df['item_id'].map(item_count_map)
+        
+        movies_df['item_avg_rating_norm'] = movies_df['item_id'].map(item_avg_map)
+        movies_df['item_std_rating_norm'] = movies_df['item_id'].map(item_std_map)
+        movies_df['item_count_norm'] = movies_df['item_id'].map(item_count_map)
         
         # 更新统计信息
         self.num_users = ratings_df['user_id'].nunique()

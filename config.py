@@ -40,10 +40,10 @@ class DataConfig:
     """数据配置"""
     # 数据路径
     data_dir: str = "data/ml-25m"
-    # 最小用户交互数
-    min_user_interactions: int = 5
-    # 最小物品交互数
-    min_item_interactions: int = 5
+    # 最小用户交互数（提高以过滤低活跃用户，保证数据质量）
+    min_user_interactions: int = 50
+    # 最小物品交互数（提高以过滤冷门物品，保证数据质量）
+    min_item_interactions: int = 50
     # 训练集比例
     train_ratio: float = 0.8
     # 时间序列分割（按时间排序）
@@ -54,6 +54,8 @@ class DataConfig:
     batch_size: int = 512
     # 数据加载线程数
     num_workers: int = 0
+    # 数据采样比例（使用10%数据，约250万条，足够训练且内存可控）
+    sample_ratio: float = 0.1
 
 
 @dataclass
