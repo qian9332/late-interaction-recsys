@@ -36,12 +36,17 @@ class MovieLensDataProcessor:
         # 数据统计
         self.stats = {}
         
+        # 数据采样比例（使用全部数据）
+        self.sample_ratio = getattr(config.data, 'sample_ratio', 1.0)
+        
     def load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """加载原始数据"""
         print("Loading MovieLens 25M dataset...")
         
-        # 加载评分数据
+        # 加载评分数据 - 使用分块读取减少内存
         ratings_path = os.path.join(self.data_dir, "ratings.csv")
+        
+        # 读取全部数据
         ratings_df = pd.read_csv(ratings_path)
         print(f"Ratings shape: {ratings_df.shape}")
         
@@ -57,6 +62,10 @@ class MovieLensDataProcessor:
         print("Preprocessing data...")
         start_time = time.time()
         
+        # 创建副本避免警告
+        ratings_df = ratings_df.copy()
+        movies_df = movies_df.copy()
+        
         # 1. 过滤低频用户和物品
         print("Filtering low-frequency users and items...")
         user_counts = ratings_df['userId'].value_counts()
@@ -68,7 +77,7 @@ class MovieLensDataProcessor:
         ratings_df = ratings_df[
             ratings_df['userId'].isin(valid_users) & 
             ratings_df['movieId'].isin(valid_items)
-        ]
+        ].copy()
         print(f"After filtering: {ratings_df.shape[0]} ratings")
         
         # 2. 编码用户和物品ID
@@ -78,7 +87,7 @@ class MovieLensDataProcessor:
         
         # 只保留在ratings中出现的电影
         valid_movie_ids = ratings_df['movieId'].unique()
-        movies_df = movies_df[movies_df['movieId'].isin(valid_movie_ids)]
+        movies_df = movies_df[movies_df['movieId'].isin(valid_movie_ids)].copy()
         movies_df['item_id'] = self.item_encoder.transform(movies_df['movieId'])
         
         # 3. 处理电影特征
@@ -119,6 +128,9 @@ class MovieLensDataProcessor:
         # 时间特征归一化
         ratings_df['hour_norm'] = ratings_df['hour'] / 23.0
         ratings_df['day_norm'] = ratings_df['day_of_week'] / 6.0
+        
+        # 删除datetime列释放内存
+        del ratings_df['datetime']
         
         # 5. 计算用户统计特征
         print("Computing user statistics...")

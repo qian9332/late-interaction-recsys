@@ -51,9 +51,9 @@ class DataConfig:
     # 负采样数量
     num_negatives: int = 4
     # 批次大小
-    batch_size: int = 1024
+    batch_size: int = 512
     # 数据加载线程数
-    num_workers: int = 4
+    num_workers: int = 0
 
 
 @dataclass
@@ -76,7 +76,7 @@ class TrainingConfig:
     # 预热轮数
     warmup_epochs: int = 1
     # 混合精度训练
-    use_amp: bool = True
+    use_amp: bool = False
     # 梯度累积步数
     gradient_accumulation_steps: int = 1
     # 日志间隔（步）
@@ -117,7 +117,7 @@ class Config:
     # 项目信息
     project_name: str = "late-interaction-recsys"
     seed: int = 42
-    device: str = "cuda"
+    device: str = "cpu"
     
     # 路径配置
     output_dir: str = "outputs"
